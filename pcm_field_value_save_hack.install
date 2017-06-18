@@ -1,0 +1,8 @@
+<?php
+
+function pcm_field_value_save_hack_install() {
+  db_query("UPDATE {system} SET weight = -10 
+            WHERE type = 'module' 
+            AND name = 'pcm_field_value_save_hack'");
+
+}

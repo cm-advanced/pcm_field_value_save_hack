@@ -1,0 +1,707 @@
+<?php
+/**
+ *  This module is a hack to deal fields (mostly multiple value field 
+ * collection values being dropped somewhere between hook_node_validate and 
+ * hook_node_presave. This module just stores the information at validate
+ * and then fetches it again at presave. 
+ * Possible problems at this point are FieldCollection or Conditional Field 
+ * related.
+ */
+
+function pcm_field_value_save_hack_get_variable_names() {
+  //ADD FIELD NAMES THAT NEED A "BOOST" BELOW
+  $names = array(
+		 "field_episode_number",
+		 "field_filler_end_date",
+		 "field_playback_preferences",
+		 "field_series_request_admin",
+		 "field_studio_request",
+		 "field_camera_request",
+		 "field_editing_request",
+		 "field_produced_city",
+		 'field_runtime',
+
+		 );
+  return $names;
+}
+
+function pcm_field_value_save_hack_get_field_requirements() {
+  $names = array(
+		 'field_studio_type' => 1,
+		 'field_open_days' => 1,
+		 'field_studio_timeslot' => 1,
+		 'field_studio_req_duration' => 1,
+		 'field_camera_type' => 1,
+		 'field_edit_room' => 1,
+		 'field_request_duration' => 1,
+		 'field_playback_interval' => 1,
+		 'field_day_part' => 1,
+		 'field_playback_comments' => 1,
+		 'field_live_source' => 0,
+		 'field_airing_channel' => 1,
+		 'field_start_day' => 1,
+		 'field_start_time' => 1,
+		 );
+  return $names;
+}
+
+
+
+function pcm_field_value_save_hack_node_validate($node) {
+  //dsm("validate");
+
+  global $pcm_field_value_save_hack_field_data;
+  global $pcm_field_value_save_hack_flag;
+  
+  $names = pcm_field_value_save_hack_get_variable_names();
+  $ret = array();
+    
+  $pcm_field_value_save_hack_field_data = $ret;
+  foreach ($names as $name) {
+    if (isset($node->{$name})) {
+      $ret[$name] = $node->{$name};
+    }
+  }
+  $pcm_field_value_save_hack_field_data = $ret;
+  $pcm_field_value_save_hack_flag = TRUE;
+}
+
+function pcm_field_value_save_hack_node_presave($node) {
+  global $pcm_field_value_save_hack_field_data;
+  global $pcm_field_value_save_hack_flag;
+  global $pcm_field_value_save_hack_new_field_collections;
+
+  $stored_fields = $pcm_field_value_save_hack_field_data ?
+    $pcm_field_value_save_hack_field_data : array();
+  
+  //dsm($stored_fields, 'presave global data');
+  if ($pcm_field_value_save_hack_new_field_collections) {
+    //dsm( $pcm_field_value_save_hack_new_field_collections, 
+    //'my created field collections');
+  }
+  	
+  foreach($stored_fields as $name=>$value) {
+    //dsm($pcm_field_value_save_hack_new_field_collections[$name]);
+    //dsm($name, 'name of mommy');
+    $new_field_collections = 
+      isset($pcm_field_value_save_hack_new_field_collections[$name]) ? 
+      $pcm_field_value_save_hack_new_field_collections[$name] : array();
+    //dsm($new_field_collections, 'up2');
+    switch ($name) {
+    case "field_episode_number":
+      $is_special_field = isset($node->field_show_is_special) ?
+	$node->field_show_is_special : array();
+      
+      $is_special = isset($is_special_field[LANGUAGE_NONE]) ?
+	$is_special_field[LANGUAGE_NONE][0]['value'] : NULL;
+      if(isset($value[LANGUAGE_NONE]) &&
+	 $value[LANGUAGE_NONE][0]['value'] &&
+	 !$is_special) {
+	$node->field_episode_number = $value;
+      }
+      else if ($is_special) {
+	//setting to null
+	$node->field_episode_number = NULL;
+      }
+      break;
+    case "field_filler_end_date":
+      if(isset($value[LANGUAGE_NONE]) && $value[LANGUAGE_NONE][0]['value']){
+	$node->field_filler_end_date = $value;
+      }
+      else {
+	//setting to null
+	$node->field_filler_end_date = NULL;
+      }
+      break;
+    case "field_produced_city":
+      if(isset($value[LANGUAGE_NONE]) && 
+	 $value[LANGUAGE_NONE][0]['value']){
+	$node->{$name} = $value;
+      }
+      else {
+	//setting to null
+	$node->{$name} = NULL;
+      }
+      break;
+    case "field_playback_preferences":
+    case "field_series_request_admin":
+    case "field_studio_request":
+    case "field_camera_request":
+    case "field_editing_request":
+      $field_values = ($node->{$name}) ? $node->{$name} : array();
+      $field_values = isset($field_values[LANGUAGE_NONE]) ?  
+      $field_values[LANGUAGE_NONE] : $field_values;
+      //dsm($field_values, 'values off node in presave');
+          
+      $has_element=FALSE;
+      $field_fcids = array();
+      $added_values = array();
+      foreach($field_values as $i => $element) {
+
+	if (isset($element['value'])) {
+	  if (isset($new_field_collections[$element['value']])) {
+	    $added_values[] = $element['value'];
+	    //dsm($element['value'], 'a new fcid for '.$name);
+	    $has_element=TRUE;
+	    //do nothing
+	  }
+	  else {
+	    unset($node->{$name}[LANGUAGE_NONE][$i]);
+	    //dsm($node->{$name}[LANGUAGE_NONE], 
+	    //	'just unset '.$element['value']);
+	  }
+	}
+	else {
+	  //do nothing
+	  $has_element=TRUE;
+	  //dsm($element['entity'], 'an entity for '.$name);
+	}
+      }
+
+      if ($added_values) {
+	//dsm($added_values, 'my added values');
+      }
+
+      //dsm($new_field_collections, 'my new collecitons');
+      foreach ($new_field_collections as $fcid=>$collection) {
+	if (!in_array($fcid, $added_values)) {
+	  $fcrid = $collection->revision_id;
+	  $node->{$name}[LANGUAGE_NONE][] = array('value' => $fcid,
+						  'revision_id' => $fcrid);
+	  $has_element = TRUE;
+	  //dsm('adding to field: '.$fcid." : ".$fcrid);
+	}
+      }
+      
+      //dsm($node->{$name}[LANGUAGE_NONE], $name . ' field aftr with presave');
+      if (!$has_element) {
+	unset($node->{$name}[LANGUAGE_NONE]);
+	//dsm($node, 'unset because field was empty');
+      }
+      break;
+    default:
+      //do nothing
+    }
+  }
+}
+function pcm_field_value_save_hack_node_insert($node) {
+  $node = pcm_field_value_save_hack_postsave($node);
+}
+function pcm_field_value_save_hack_node_update($node) {
+  $node = pcm_field_value_save_hack_postsave($node);
+}
+
+function pcm_field_value_save_hack_postsave($node) {
+  global $pcm_field_value_save_hack_field_data;
+  global $pcm_field_value_save_hack_flag;
+  global $pcm_field_value_save_hack_new_field_collections;
+
+  $pcm_field_value_save_hack_new_field_collections = 
+    isset($pcm_field_value_save_hack_new_field_collections) ? 
+    $pcm_field_value_save_hack_new_field_collections: array();
+
+  if ($pcm_field_value_save_hack_flag) {
+    $pcm_field_value_save_hack_flag = FALSE;
+
+    $stored_fields = $pcm_field_value_save_hack_field_data ?
+      $pcm_field_value_save_hack_field_data : array();
+
+    //LOOPING THROUGH ALL THE FIELDS THAT WE ARE GOING TO BOOST
+    foreach($stored_fields as $name=>$field) {
+      $boosted_field = FALSE;
+      //dsm($field[LANGUAGE_NONE], 'postsave: processing field: '.$name);
+
+      //LOOPING THROUGH EACH VALUE SUBMITTED FOR THE FIELD
+      foreach($field[LANGUAGE_NONE] as $index=>$values) {
+	$field_values = pcm_field_value_save_hack_field_values($name, $values);
+	if ($field_values) {
+	  //dsm($field_values,"About to create field collection for $name");
+	  
+	  $node->is_new = FALSE;
+	  $ret =
+	    pcm_field_value_save_hack_add_field_collection($node, 'node',
+							   $name,
+							   $field_values);
+
+	  $pcm_field_value_save_hack_new_field_collections[$name] = 
+	    isset($pcm_field_value_save_hack_new_field_collections[$name]) ? 
+	    $pcm_field_value_save_hack_new_field_collections[$name]: array();
+	  $pcm_field_value_save_hack_new_field_collections[$name]
+	    [$ret->item_id] = $ret;
+	  $boosted_field = TRUE;
+	  //dsm($ret, 'new field collection: '.$name. ' '. $ret->item_id);
+	  //dsm($pcm_field_value_save_hack_new_field_collections, 'yo dad');
+	}
+      }
+      //DONE LOOPING THROUGH ALL THE FIELDS FOR A LOOP
+      //dsm('postsave: updated field: '.$name);	    
+      if ($boosted_field) {
+	//dsm($node->{$name}, 'boosting field!!!!!!!!!!!!!!!!!');
+	$var_name = 'pcm_field_value_save_hack_boosting_'.$name;
+	global $$var_name;
+	$$var_name = TRUE;
+      }
+      else {
+	//dsm("didn't add field collection");
+      }
+    }
+  }
+  else {
+    //dsm($node, 'postsave: doing nothing: ');
+    //dsm($pcm_field_value_save_hack_new_field_collections, 'holy cow');
+    foreach ($pcm_field_value_save_hack_new_field_collections as $name=>$v) {
+      $node_values_count = count($node->{$name}[LANGUAGE_NONE]);
+      $added_fc_count = count($v);
+
+      if ($added_fc_count && $added_fc_count != $node_values_count) {
+	$stored_field_count = 0;
+	foreach ($pcm_field_value_save_hack_field_data[$name] as $data) {
+	  foreach($data as $data_vals) {
+	    $field_values = pcm_field_value_save_hack_field_values($name, 
+								   $data_vals);
+	    if ($field_values) {
+	      $stored_field_count ++;
+	    }
+	  }
+	}
+
+	if ($stored_field_count > $added_fc_count) {
+	  //dsm("only $added_fc_count instead of $stored_field_count, continue");
+	  continue;
+	} 
+
+	//dsm("THERE IS A DIFFERENCE????????????????????????????????");
+	//dsm($stored_field_count, 'stored this many fields for '.$name);
+	//dsm($node->{$name}[LANGUAGE_NONE],$node_values_count." in node");
+	//dsm($v, $added_fc_count." found in newly created fcs");
+
+	$var_name = "pcm_field_value_save_hack_have_readded_".$name;
+	global $$var_name;
+	if (isset($$var_name)) {
+	  //dsm('already started rea-dding, skipping for '.$name);
+	  continue;
+	}
+	$$var_name = TRUE;
+
+	$counter = 0;
+
+	foreach ($v as $fcid=>$entity) {
+	  $sql ="SELECT * from {field_collection_item} where item_id=:item_id";
+	  $results = db_query($sql, array(':item_id' => $fcid));
+	  $has_results = FALSE;
+
+	  while ($result = $results->fetchObject()) {
+	    //dsm("looping for $name");
+	    $has_results = TRUE;
+	    $counter ++;
+	    $table_types = array('data', 'revision');
+	    foreach($table_types as $type) {
+	      $sql =  
+		"INSERT INTO field_".$type."_".$name." 
+                 (entity_type, bundle, deleted, entity_id, revision_id, 
+                 language, delta , ".$name."_value, ".$name."_revision_id ) 
+                 VALUES ('node', 'series_request', 0, ".$node->nid.",".
+                 $node->vid.", 'und',".$counter.", ".$result->item_id.", ".
+                 $result->revision_id.")";
+	      db_query($sql);
+	      cache_clear_all('field:node:'.$node->nid, 'cache_field');
+	    }
+	    $counter ++;
+	  }
+	  if (!$has_results) {
+	    //dsm("copying over old for $name");
+	    $field_values = 
+	      pcm_field_value_save_hack_copy_entity_values($entity);
+	    if ($field_values) {
+	      $node->is_new = FALSE;
+	    
+	      //dsm($field_values, 'about to to create anthr fieldcollectn');
+	      $ret =
+		pcm_field_value_save_hack_add_field_collection($node, 'node',
+							       $name,
+							       $field_values);
+	      
+	    
+	      $pcm_field_value_save_hack_new_field_collections[$name] = 
+		isset($pcm_field_value_save_hack_new_field_collections[$name]) 
+		? $pcm_field_value_save_hack_new_field_collections[$name]: 
+		array();
+	      $pcm_field_value_save_hack_new_field_collections[$name]
+		[$ret->item_id] = $ret;
+
+	      //dsm($ret, "&&&&&&&&&&&&&&&&&just created field collection ");
+	    }
+	  }
+	}
+	
+	//dsm("finished readding fcols for $name");
+      }
+    }
+  }
+
+  //dsm("cleaning up");
+  //////////////////////////////////////////////////////////////////////
+  //CLEANUP, FIX THE DB IF IT WAS LEFT IN A BAD STATE
+  //dsm($pcm_field_value_save_hack_new_field_collections, 'wtf1');
+
+  foreach ($pcm_field_value_save_hack_new_field_collections as $name=>$v) {  
+    //delete rows in the fc field table for the values without a row
+    //in field_collection_item
+    $sql = 
+      "DELETE t 
+       FROM field_data_".$name." t
+       LEFT JOIN field_collection_item i
+         ON i.item_id=t.".$name."_value 
+       WHERE i.item_id IS null";
+    db_query($sql);
+
+    $sql = 
+      "DELETE t 
+       FROM field_revision_".$name." t
+       LEFT JOIN field_collection_item i
+         ON i.item_id=t.".$name."_value 
+       WHERE i.item_id IS null";
+    db_query($sql);
+
+    $table_types = array('data', 'revision');
+    foreach($table_types as $type) {
+      $sql = 
+	"DELETE 
+         FROM field_".$type."_".$name." 
+         WHERE entity_id=".$node->nid;
+      ////dsm($sql, 'my delete sql');
+      db_query($sql);
+    }
+    
+    //insert missing rows into fc field table that exist in 
+    //field_collection_item
+    $sql = 
+      "SELECT i.item_id, i.field_name, i.revision_id
+       FROM field_collection_item i 
+       LEFT JOIN field_data_".$name." t
+       ON t.".$name."_value = i.item_id
+       WHERE t.entity_id is NULL
+       AND i.field_name='".$name."'";
+
+    //dsm($sql, 'my custom sql');
+
+
+    $results = db_query($sql);
+    $has_inserted = FALSE;
+
+    $created_fcids = 
+      $pcm_field_value_save_hack_new_field_collections[$name];
+    //dsm($created_fcids, 'creatd fcids');
+    $counter = 0;  
+    while ($result = $results->fetchObject()) {
+      if (isset($created_fcids[$result->item_id])) { 
+
+	//dsm($result, 'in created, yay!');
+	$table_types = array('data', 'revision');
+
+	foreach($table_types as $type) {
+	  $sql =  
+	    "INSERT INTO field_".$type."_".$name." 
+            (entity_type, bundle, deleted, entity_id, revision_id, 
+            language, delta , ".$name."_value, ".$name."_revision_id ) 
+            VALUES ('node', 'series_request', 0, ".$node->nid.",".
+	    $node->vid.", 'und',".$counter.", ".$result->item_id.", ".
+	    $result->revision_id.")";
+	  //dsm($sql, 'more sql');
+	  db_query($sql);
+	  $has_inserted = TRUE;
+	}
+	$counter ++;
+      }
+      else {
+	//dsm($result, 'not in created!');
+      }
+    }
+  }
+  if (isset($has_inserted) && $has_inserted) {
+    cache_clear_all('field:node:'.$node->nid, 'cache_field');
+  }
+
+  return $node;
+}
+
+
+function pcm_field_value_save_hack_field_values($name, $values) {
+  if (!is_array($values)) {
+    return array();
+  }
+
+  switch ($name) {
+  case "field_playback_preferences":	
+    $interval = 
+      $values['field_playback_interval'][LANGUAGE_NONE][0]['tid'];
+    
+    $day_part = $values['field_day_part'][LANGUAGE_NONE][0]['tid'];
+    
+    $comments = 
+      $values['field_playback_comments'][LANGUAGE_NONE][0]['value'];
+    
+    $field_values = 
+      array(
+	    'field_playback_interval' => $interval,
+	    'field_day_part' => $day_part,
+	    'field_playback_comments' => $comments,
+	    );
+    break;
+  case "field_editing_request":
+    $edit_room = $values['field_edit_room'][LANGUAGE_NONE][0]['value'];
+    $request_duration = 
+      $values['field_request_duration'][LANGUAGE_NONE][0]['value'];
+    $open_days = $values['field_open_days'][LANGUAGE_NONE][0]['value'];
+    $studio_timeslot = 
+      $values['field_studio_timeslot'][LANGUAGE_NONE][0]['value'];
+
+    $field_values = 
+      array(
+	    'field_edit_room' => $edit_room,
+	    'field_request_duration' => $request_duration,
+	    'field_open_days' => $open_days,
+	    'field_studio_timeslot' => $studio_timeslot,
+	    );
+    break;
+
+  case "field_camera_request":
+    $camera_type = $values['field_camera_type'][LANGUAGE_NONE][0]['value'];
+    $open_days = $values['field_open_days'][LANGUAGE_NONE][0]['value'];
+    $studio_timeslot = 
+      $values['field_studio_timeslot'][LANGUAGE_NONE][0]['value'];
+
+    $field_values = 
+      array(
+	    'field_camera_type' => $camera_type,
+	    'field_open_days' => $open_days,
+	    'field_studio_timeslot' => $studio_timeslot,
+	    );
+    break;
+
+  case "field_studio_request":	
+    $studio_type = 
+      $values['field_studio_type'][LANGUAGE_NONE][0]['tid'];
+    
+    $open_days = $values['field_open_days'][LANGUAGE_NONE][0]['value'];
+    
+    $studio_timeslot = 
+      $values['field_studio_timeslot'][LANGUAGE_NONE][0]['value'];
+
+    $studio_req_duration = 
+      $values['field_studio_req_duration'][LANGUAGE_NONE][0]['value'];
+    
+    $field_values = 
+      array(
+	    'field_studio_type' => $studio_type,
+	    'field_open_days' => $open_days,
+	    'field_studio_timeslot' => $studio_timeslot,
+	    'field_studio_req_duration' => $studio_req_duration,
+
+	    );
+    break;
+
+  case "field_series_request_admin":
+    $live_source =
+      $values['field_live_source'][LANGUAGE_NONE][0]['value'];
+    
+    $airing_channel =
+      $values['field_airing_channel'][LANGUAGE_NONE][0]['tid'];
+    
+    $start_day =
+      $values['field_start_day'][LANGUAGE_NONE][0]['value'];
+    
+    $start_time =
+      $values['field_start_time'][LANGUAGE_NONE][0]['value'];
+    
+    if ($start_time) {
+      $field_values =
+	array(
+	      'field_live_source' => $live_source,
+	      'field_airing_channel' => $airing_channel,
+	      'field_start_day' => $start_day,
+	      'field_start_time' => $start_time,
+	      );
+    }
+    else {
+      $field_values = array();
+    }
+    break;
+  default:
+    //drupal_set_message("no field value logic for $name!");
+  }
+  $field_values = 
+    pcm_field_value_save_hack_remove_empty_collections($field_values);
+
+  return $field_values;
+  
+}
+
+function pcm_field_value_save_hack_copy_entity_values($entity) {
+  switch ($entity->field_name) {
+  case "field_playback_preferences":	
+    $interval = $entity->field_playback_interval[LANGUAGE_NONE][0]['tid'];
+    $day_part = $entity->field_day_part[LANGUAGE_NONE][0]['tid'];
+    $comments = $entity->field_playback_comments[LANGUAGE_NONE][0]['value'];
+    
+    $field_values = array(
+			  'field_playback_interval' => $interval,
+			  'field_day_part' => $day_part,
+			  'field_playback_comments' => $comments,
+			  );
+    break;
+
+  case "field_studio_request":	
+    $studio_type = 
+      $entity->field_studio_type[LANGUAGE_NONE][0]['tid'];
+    
+    $open_days = $entity->field_open_days[LANGUAGE_NONE][0]['value'];
+    
+    $studio_timeslot = 
+      $entity->field_studio_timeslot[LANGUAGE_NONE][0]['value'];
+
+    $studio_req_duration = 
+      $entity->field_studio_req_duration[LANGUAGE_NONE][0]['value'];
+    
+    $field_values = 
+      array(
+	    'field_studio_type' => $studio_type,
+	    'field_open_days' => $open_days,
+	    'field_studio_timeslot' => $studio_timeslot,
+	    'field_studio_req_duration' => $studio_req_duration,
+
+	    );
+    break;
+  case "field_editing_request":
+    $edit_room = $entity->field_edit_room[LANGUAGE_NONE][0]['value'];
+    $request_duration = 
+      $entity->field_request_duration[LANGUAGE_NONE][0]['value'];
+    $open_days = $entity->field_open_days[LANGUAGE_NONE][0]['value'];
+    $studio_timeslot = 
+      $entity->field_studio_timeslot[LANGUAGE_NONE][0]['value'];
+
+    $field_values = 
+      array(
+	    'field_edit_room' => $edit_room,
+	    'field_request_duration' => $request_duration,
+	    'field_open_days' => $open_days,
+	    'field_studio_timeslot' => $studio_timeslot,
+	    );
+    break;
+
+  case "field_camera_request":
+    $camera_type = $entity->field_camera_type[LANGUAGE_NONE][0]['value'];
+    $open_days = $entity->field_open_days[LANGUAGE_NONE][0]['value'];
+    $studio_timeslot = 
+      $entity->field_studio_timeslot[LANGUAGE_NONE][0]['value'];
+
+    $field_values = 
+      array(
+	    'field_camera_type' => $camera_type,
+	    'field_open_days' => $open_days,
+	    'field_studio_timeslot' => $studio_timeslot,
+	    );
+    break;
+
+
+  case "field_series_request_admin":
+    $live_source = $entity->field_live_source[LANGUAGE_NONE][0]['value'];    
+    $airing_channel = $entity->field_airing_channel[LANGUAGE_NONE][0]['tid'];
+    $start_day = $entity->field_start_day[LANGUAGE_NONE][0]['value'];
+    $start_time = $entity->field_start_time[LANGUAGE_NONE][0]['value'];
+    
+    if ($start_time) {
+      $field_values = array(
+			    'field_live_source' => $live_source,
+			    'field_airing_channel' => $airing_channel,
+			    'field_start_day' => $start_day,
+			    'field_start_time' => $start_time,
+			    );
+    }
+    else {
+      $field_values = array();
+    }
+    break;
+  default:
+    //drupal_set_message("no field value logic for $name!");
+  }
+  $field_values = 
+    pcm_field_value_save_hack_remove_empty_collections($field_values);
+  return $field_values;
+  
+}
+
+function pcm_field_value_save_hack_remove_empty_collections($field_values) {
+  if (!$field_values) {
+    return $field_values;
+  }
+
+  $reqs = pcm_field_value_save_hack_get_field_requirements();  
+  foreach($field_values as $field=>$value) {
+    if (!isset($reqs[$field])) {
+      drupal_set_message("No field definition for $field", 'error');
+    }
+    if (!$value && $reqs[$field]) {
+      //empty value, wipe it out
+      return array();
+    }
+  }
+  return $field_values;
+}
+
+function pcm_field_value_save_hack_node_load($nodes, $types) {
+  //dsm($nodes, 'my loaded nodes');
+}
+function pcm_field_value_save_hack_test() {
+  $parent = node_load(4415);
+  $type = 'node';
+  $collection_name = 'field_playback_preferences';
+  $values = array(
+		  'field_playback_interval' => 769,
+		  'field_day_part' => 783,
+		  'field_playback_comments' => "hi mom!"
+		  );
+
+  $ret = pcm_field_value_save_hack_add_field_collection($parent, $type,
+							$collection_name, 
+							$values);
+
+  //dsm($ret);
+}
+/**
+ * Creates a field collection.
+ *
+ * @param $parent
+ * @param $type
+ * @param $collection_name
+ * @param $values
+ * @return object
+ *
+ * Taken from http://devblog.com.au/programmatically-create-field-collections-in-drupal
+ */
+function pcm_field_value_save_hack_add_field_collection($parent, $type, 
+							$collection_name, 
+							$values) {
+ 
+  // Create entity using the entity name and set the parent.
+  $field_collection_item = 
+    entity_create('field_collection_item', 
+		  array('field_name' => $collection_name));
+  
+  $field_collection_item->setHostEntity($type, $parent);
+ 
+  // EMW makes it easier for us to work with the field_collection
+  $field_collection_item_w = 
+    entity_metadata_wrapper('field_collection_item', $field_collection_item);
+ 
+  // Add the fields to the entity.
+  foreach($values as $key => $value) {
+    $field_collection_item_w->{$key}->set($value);
+  }
+  //dsm($values, 'about to save for these values');
+  //dsm($collection_name, 'cl');
+  // Save the entity.
+  $field_collection_item_w->save();
+  
+  return $field_collection_item;
+}
